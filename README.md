@@ -113,3 +113,71 @@ src/
 ```
 
 El BFF **no decodifica el JWT**: solo reenvía el header `Authorization` recibido del cliente hacia cada microservicio. La validación ya ocurre en nginx (`auth_request`) y de nuevo en cada microservicio downstream (`@login_required`).
+
+---
+
+## Despliegue en AWS — DevOps (ISY1101)
+
+### Arquitectura en producción
+
+```
+Internet → ALB (puerto 80)
+  /api/* → ECS Fargate Task: hub-bff (puerto 3000)  ← este servicio
+  /*     → ECS Fargate Task: hub-frontend (puerto 80)
+
+hub-bff → ms-operacion  (ECS interno, puerto 5000)
+hub-bff → ms-facturacion (ECS interno, puerto 5000)
+ms-*    → RDS PostgreSQL (hub-empresarial-db, puerto 5432, privado)
+```
+
+- **Cluster:** `hub-empresarial-cluster` (AWS ECS Fargate)
+- **Imagen:** `720243276279.dkr.ecr.us-east-1.amazonaws.com/hub-bff:<sha>`
+- **Task Definition:** 256 CPU units / 512 MB RAM, execution role y task role = `LabRole`
+- **Puerto mapeado:** 3000
+- **URL pública:** `http://hub-empresarial-alb-1969847223.us-east-1.elb.amazonaws.com`
+
+### Pipeline CI/CD (GitHub Actions)
+
+Push a `main` dispara `.github/workflows/deploy.yml` automáticamente:
+
+```
+1. Checkout código
+2. Configurar credenciales AWS (desde GitHub Secrets)
+3. Login a Amazon ECR
+4. Build de imagen Docker (Dockerfile multietapa)
+5. Push a ECR con tag SHA del commit + latest
+6. Descargar task definition actual desde ECS
+7. Actualizar imagen en task definition
+8. Deploy a ECS (rolling, sin downtime)
+```
+
+Duración media: **~3m 38s**.
+
+### GitHub Secrets requeridos
+
+| Secret | Descripción |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | Credencial de AWS Academy Learner Lab |
+| `AWS_SECRET_ACCESS_KEY` | Credencial de AWS Academy Learner Lab |
+| `AWS_SESSION_TOKEN` | Token de sesión (caduca — renovar antes de cada push) |
+| `AWS_REGION` | `us-east-1` |
+
+### Dockerfile multietapa
+
+La imagen usa build multietapa para producción:
+- **Etapa `build`:** `node:20-alpine` — compila TypeScript, instala devDependencies
+- **Etapa `production`:** `node:20-alpine` — solo runtime, sin fuentes ni devDependencies
+
+Resultado: imagen slim sin código fuente expuesto.
+
+### Verificar despliegue
+
+```bash
+# Health check público
+curl http://hub-empresarial-alb-1969847223.us-east-1.elb.amazonaws.com/api/v1/bff/health
+# {"status":"ok","service":"bff"}
+
+# Dashboard (requiere JWT)
+curl -H "Authorization: Bearer <token>" \
+  http://hub-empresarial-alb-1969847223.us-east-1.elb.amazonaws.com/api/v1/bff/dashboard
+```
