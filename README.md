@@ -1,4 +1,4 @@
-# hub-bff
+# hub-bff ..
 
 Backend for Frontend (NestJS) del Hub Empresarial. Agrega en un solo payload los datos de **dos microservicios** (`ms-operacion` y `ms-facturacion`) y protege cada llamada downstream con el patrón **Circuit Breaker**.
 
